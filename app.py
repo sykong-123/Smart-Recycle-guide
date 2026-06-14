@@ -655,6 +655,17 @@ section[data-testid="stSidebar"] [data-testid="stAlert"] {
   border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.08);
 }
 section[data-testid="stSidebar"] [data-testid="stAlert"] * { color:#eaf7ed !important; }
+button[kind="header"] {
+  color:var(--green-dark) !important;
+  background:rgba(25,122,69,.10) !important;
+  border-radius:10px !important;
+}
+button[kind="header"] svg { color:var(--green-dark) !important; fill:var(--green-dark) !important; }
+section[data-testid="stSidebar"] button[kind="header"] {
+  color:#ffffff !important;
+  background:rgba(255,255,255,.16) !important;
+}
+section[data-testid="stSidebar"] button[kind="header"] svg { color:#ffffff !important; fill:#ffffff !important; }
 
 /* Main widgets */
 div[data-testid="stVerticalBlockBorderWrapper"] {
@@ -1055,34 +1066,32 @@ def render_analysis_panel(settings: Dict[str, Any]) -> None:
             unsafe_allow_html=True,
         )
 
-        camera_tab, upload_tab = st.tabs(["카메라로 촬영", "사진 파일 업로드"])
         camera_file = None
-        with camera_tab:
-            if "camera_enabled" not in st.session_state:
-                st.session_state["camera_enabled"] = False
+        if "camera_enabled" not in st.session_state:
+            st.session_state["camera_enabled"] = False
 
-            camera_button_label = (
-                "📴 카메라 끄기"
-                if st.session_state["camera_enabled"]
-                else "📷 카메라 켜기"
+        camera_button_label = (
+            "📴 카메라 끄기"
+            if st.session_state["camera_enabled"]
+            else "📷 카메라 켜기"
+        )
+        if st.button(camera_button_label, use_container_width=True):
+            st.session_state["camera_enabled"] = not st.session_state["camera_enabled"]
+            st.rerun()
+
+        if st.session_state["camera_enabled"]:
+            camera_file = st.camera_input("쓰레기를 촬영하세요")
+        else:
+            st.markdown(
+                '<div class="empty-card">카메라가 꺼져 있습니다. 촬영하려면 위 버튼을 눌러주세요.</div>',
+                unsafe_allow_html=True,
             )
-            if st.button(camera_button_label, use_container_width=True):
-                st.session_state["camera_enabled"] = not st.session_state["camera_enabled"]
-                st.rerun()
 
-            if st.session_state["camera_enabled"]:
-                camera_file = st.camera_input("쓰레기를 촬영하세요")
-            else:
-                st.markdown(
-                    '<div class="empty-card">카메라가 꺼져 있습니다. 촬영하려면 위 버튼을 눌러주세요.</div>',
-                    unsafe_allow_html=True,
-                )
-
-        with upload_tab:
-            uploaded_file = st.file_uploader(
-                "사진을 선택하세요",
-                type=["jpg", "jpeg", "png", "webp"],
-            )
+        st.markdown('<div class="mini-caption" style="margin-top:14px">또는 저장된 사진 파일을 업로드하세요.</div>', unsafe_allow_html=True)
+        uploaded_file = st.file_uploader(
+            "사진을 선택하세요",
+            type=["jpg", "jpeg", "png", "webp"],
+        )
 
         selected_file = camera_file if camera_file is not None else uploaded_file
         item_hint = st.text_input(
