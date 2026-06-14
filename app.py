@@ -22,8 +22,8 @@ DATA_DIR = BASE_DIR / "app_data"
 IMAGE_DIR = DATA_DIR / "history_images"
 HISTORY_FILE = DATA_DIR / "waste_history.json"
 NEWS_FILE = DATA_DIR / "news_cache.json"
-NAVER_NEWS_FILE = DATA_DIR / "naver_news_cache.json"
 PROGRAM_ARCHIVE = BASE_DIR / "RecycleHelper.zip"
+PROGRAM_ICON = BASE_DIR / "program_download_icon.png"
 
 MAX_HISTORY = 50
 MAX_NEWS = 6
@@ -67,6 +67,32 @@ CONTAMINATION_KEYS = [
     "세척 여부",
     "권장 배출",
 ]
+
+MODEL_OPTIONS = {
+    "Gemini": {
+        "Gemini 2.5 Flash": "gemini-2.5-flash",
+        "Gemini 2.5 Pro": "gemini-2.5-pro",
+        "Gemini 2.0 Flash": "gemini-2.0-flash",
+        "Gemini 1.5 Flash Latest": "gemini-1.5-flash-latest",
+    },
+    "OpenAI (GPT)": {
+        "GPT-4.1 mini": "gpt-4.1-mini",
+        "GPT-4.1": "gpt-4.1",
+        "GPT-4o mini": "gpt-4o-mini",
+        "GPT-4o": "gpt-4o",
+    },
+    "ChatKHU": {
+        "Claude 4.6 Sonnet": "claude-4.6-sonnet",
+        "Claude 4.5 Sonnet": "claude-4.5-sonnet",
+        "Gemini 3.5 Flash": "gemini-3.5-flash",
+        "Gemini 3.1 Pro": "gemini-3.1-pro",
+        "Gemini 2.5 Flash": "gemini-2.5-flash",
+        "Gemini 2.5 Pro": "gemini-2.5-pro",
+        "GPT-5.3 Chat": "gpt-5.3-chat",
+        "GPT-5.2 Chat": "gpt-5.2-chat",
+        "GPT-4.1 mini": "gpt-4.1-mini",
+    },
+}
 
 
 def ensure_storage() -> None:
@@ -626,61 +652,6 @@ def fetch_google_news(query: str, max_items: int = MAX_NEWS) -> List[Dict[str, s
     return items
 
 
-def fetch_naver_news(
-    query: str,
-    client_id: str,
-    client_secret: str,
-    max_items: int = MAX_NEWS,
-) -> List[Dict[str, str]]:
-    if not client_id.strip() or not client_secret.strip():
-        raise ValueError("Naver Client ID와 Client Secret이 필요합니다.")
-
-    params = urllib.parse.urlencode(
-        {
-            "query": query,
-            "display": max_items,
-            "start": 1,
-            "sort": "date",
-        }
-    )
-    url = f"https://openapi.naver.com/v1/search/news.json?{params}"
-    request = urllib.request.Request(
-        url,
-        headers={
-            "X-Naver-Client-Id": client_id.strip(),
-            "X-Naver-Client-Secret": client_secret.strip(),
-            "User-Agent": "Mozilla/5.0 SmartWasteNews/1.0",
-        },
-    )
-
-    with urllib.request.urlopen(request, timeout=10) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-
-    items: List[Dict[str, str]] = []
-    for item in payload.get("items", [])[:max_items]:
-        title = strip_html(item.get("title", "제목 없음"))
-        description = strip_html(item.get("description", ""))
-        link = item.get("originallink") or item.get("link", "")
-        pub_date = item.get("pubDate", "")
-        try:
-            published = parsedate_to_datetime(pub_date).strftime("%Y.%m.%d %H:%M")
-        except Exception:
-            published = now_kst().strftime("%Y.%m.%d %H:%M")
-        items.append(
-            {
-                "published": published,
-                "title": title,
-                "description": description[:500],
-                "source": "Naver News",
-                "source_url": "",
-                "link": link,
-                "summary": basic_news_summary(title, description),
-                "summary_source": "기본 요약",
-            }
-        )
-    return items
-
-
 def summarize_news_with_ai(
     news_items: List[Dict[str, str]],
     provider: str,
@@ -747,15 +718,9 @@ def refresh_news(
     provider: str,
     api_key: str,
     model_name: str,
-    source: str = "google",
-    client_id: str = "",
-    client_secret: str = "",
     cache_path: Path = NEWS_FILE,
 ) -> None:
-    if source == "naver":
-        items = fetch_naver_news(query, client_id, client_secret)
-    else:
-        items = fetch_google_news(query)
+    items = fetch_google_news(query)
 
     if use_ai_summary and api_key.strip():
         items = summarize_news_with_ai(
@@ -769,7 +734,7 @@ def refresh_news(
         {
             "updated_at": now_kst().strftime("%Y-%m-%d %H:%M:%S"),
             "query": query,
-            "source": source,
+            "source": "google",
             "items": items,
         },
     )
@@ -921,6 +886,15 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 .stButton > button[kind="primary"] { background:var(--green) !important; color:white !important; }
 .stButton > button[kind="primary"]:hover { background:var(--green-dark) !important; }
 .stButton > button:not([kind="primary"]), .stLinkButton > a { background:#edf2ed !important; color:var(--ink) !important; }
+[data-testid="stDownloadButton"] > button {
+  border:1.4px solid var(--green-dark) !important;
+  background:#f8fbf8 !important;
+  color:var(--green-dark) !important;
+}
+[data-testid="stDownloadButton"] > button:hover {
+  background:var(--green-soft) !important;
+  color:var(--green-dark) !important;
+}
 [data-testid="stFileUploaderDropzone"] {
   min-height:56px !important; height:56px !important; display:flex; align-items:center; border:2px dashed #b9cabb !important;
   border-radius:16px !important; background:#f8fbf8 !important;
@@ -1009,11 +983,12 @@ def render_sidebar() -> Dict[str, Any]:
             help="입력한 키는 파일에 저장되지 않습니다.",
             key="openai_api_key",
         )
-        model_name = st.sidebar.text_input(
-            "GPT 모델명",
-            value="gpt-4.1-mini",
+        selected_model = st.sidebar.selectbox(
+            "GPT 모델",
+            list(MODEL_OPTIONS["OpenAI (GPT)"].keys()),
             key="openai_model_name",
         )
+        model_name = MODEL_OPTIONS["OpenAI (GPT)"][selected_model]
     elif provider == "ChatKHU":
         existing_key = get_secret_env_or_keyring("CHATKHU_API_KEY")
         api_key = st.sidebar.text_input(
@@ -1024,11 +999,20 @@ def render_sidebar() -> Dict[str, Any]:
             help="로컬 실행 시 keyring에 저장된 키를 자동으로 불러올 수 있습니다.",
             key="chatkhu_api_key",
         )
-        model_name = st.sidebar.text_input(
-            "ChatKHU 모델명",
-            value=get_secret_or_env("CHATKHU_MODEL_NAME") or "chatkhu-vision",
+        chatkhu_labels = list(MODEL_OPTIONS["ChatKHU"].keys())
+        default_chatkhu_value = get_secret_or_env("CHATKHU_MODEL_NAME")
+        default_chatkhu_index = 0
+        for index, label in enumerate(chatkhu_labels):
+            if MODEL_OPTIONS["ChatKHU"][label] == default_chatkhu_value:
+                default_chatkhu_index = index
+                break
+        selected_model = st.sidebar.selectbox(
+            "ChatKHU 모델",
+            chatkhu_labels,
+            index=default_chatkhu_index,
             key="chatkhu_model_name",
         )
+        model_name = MODEL_OPTIONS["ChatKHU"][selected_model]
         if not get_secret_or_env("CHATKHU_API_URL"):
             st.sidebar.warning("ChatKHU를 쓰려면 CHATKHU_API_URL을 Secrets 또는 환경변수에 설정해야 합니다.")
     else:
@@ -1041,11 +1025,12 @@ def render_sidebar() -> Dict[str, Any]:
             help="입력한 키는 파일에 저장되지 않습니다.",
             key="gemini_api_key",
         )
-        model_name = st.sidebar.text_input(
-            "Gemini 모델명",
-            value="gemini-2.5-flash",
+        selected_model = st.sidebar.selectbox(
+            "Gemini 모델",
+            list(MODEL_OPTIONS["Gemini"].keys()),
             key="gemini_model_name",
         )
+        model_name = MODEL_OPTIONS["Gemini"][selected_model]
 
     if test_mode:
         st.sidebar.info("테스트 모드에서는 API 비용이 발생하지 않습니다.")
@@ -1066,27 +1051,8 @@ def render_sidebar() -> Dict[str, Any]:
         help="테스트 모드가 꺼져 있고 선택한 AI의 API 키가 있을 때 기사별 한 줄 요약을 만듭니다.",
     )
 
-    naver_client_id = get_secret_or_env("NAVER_CLIENT_ID")
-    naver_client_secret = get_secret_or_env("NAVER_CLIENT_SECRET")
-    if naver_client_id and naver_client_secret:
-        st.sidebar.success("Naver 검색 API 키가 Secrets에 설정되어 있습니다.")
-    else:
-        st.sidebar.warning("Naver 뉴스 탭을 쓰려면 Streamlit Secrets에 Naver API 키를 설정하세요.")
-        naver_client_id = st.sidebar.text_input(
-            "Naver Client ID",
-            value=naver_client_id,
-            type="password",
-            help="로컬 테스트용 입력칸입니다. GitHub 코드에는 저장되지 않습니다.",
-        )
-        naver_client_secret = st.sidebar.text_input(
-            "Naver Client Secret",
-            value=naver_client_secret,
-            type="password",
-            help="로컬 테스트용 입력칸입니다. GitHub 코드에는 저장되지 않습니다.",
-        )
-
     st.sidebar.info(
-        "Google 뉴스 수집에는 API 키가 필요하지 않습니다. Naver 뉴스 수집에는 Naver 개발자센터 키가 필요합니다. "
+        "뉴스 수집은 Google News RSS를 사용하므로 별도 뉴스 API 키가 필요하지 않습니다. "
         "선택한 AI의 API 키는 사진 분석과 AI 뉴스 요약에만 사용됩니다."
     )
     st.sidebar.caption(
@@ -1100,8 +1066,6 @@ def render_sidebar() -> Dict[str, Any]:
         "model_name": model_name,
         "news_query": news_query,
         "use_ai_news_summary": use_ai_news_summary,
-        "naver_client_id": naver_client_id,
-        "naver_client_secret": naver_client_secret,
     }
 
 
@@ -1156,22 +1120,6 @@ def render_news_panel(settings: Dict[str, Any]) -> None:
             )
         except Exception:
             pass
-    if not NAVER_NEWS_FILE.exists() and settings.get("naver_client_id") and settings.get("naver_client_secret"):
-        try:
-            refresh_news(
-                query=str(settings["news_query"]),
-                use_ai_summary=False,
-                provider=str(settings["provider"]),
-                api_key="",
-                model_name=str(settings["model_name"]),
-                source="naver",
-                client_id=str(settings["naver_client_id"]),
-                client_secret=str(settings["naver_client_secret"]),
-                cache_path=NAVER_NEWS_FILE,
-            )
-        except Exception:
-            pass
-
     with st.container(border=True):
         head_left, head_right = st.columns([2.2, 1])
         with head_left:
@@ -1193,57 +1141,23 @@ def render_news_panel(settings: Dict[str, Any]) -> None:
                         provider=str(settings["provider"]),
                         api_key=str(settings["api_key"]),
                         model_name=str(settings["model_name"]),
-                        source="google",
                         cache_path=NEWS_FILE,
                     )
-                    if settings.get("naver_client_id") and settings.get("naver_client_secret"):
-                        refresh_news(
-                            query=str(settings["news_query"]),
-                            use_ai_summary=use_ai,
-                            provider=str(settings["provider"]),
-                            api_key=str(settings["api_key"]),
-                            model_name=str(settings["model_name"]),
-                            source="naver",
-                            client_id=str(settings["naver_client_id"]),
-                            client_secret=str(settings["naver_client_secret"]),
-                            cache_path=NAVER_NEWS_FILE,
-                        )
                     st.success("최신 뉴스로 갱신했습니다.")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"뉴스 새로고침에 실패했습니다: {exc}")
 
-        google_tab, naver_tab = st.tabs(["Google 뉴스", "Naver 뉴스"])
-
-        with google_tab:
-            cache = load_news(NEWS_FILE)
-            st.markdown(
-                f'<div class="mini-caption">마지막 갱신: {html.escape(str(cache.get("updated_at", "알 수 없음")))}</div>',
-                unsafe_allow_html=True,
-            )
-            items = cache.get("items", DEFAULT_NEWS)
-            if items:
-                st.markdown(news_cards_html(items), unsafe_allow_html=True)
-            else:
-                st.markdown('<div class="empty-card">표시할 Google 뉴스가 없습니다.</div>', unsafe_allow_html=True)
-
-        with naver_tab:
-            cache = load_news(NAVER_NEWS_FILE)
-            st.markdown(
-                f'<div class="mini-caption">마지막 갱신: {html.escape(str(cache.get("updated_at", "알 수 없음")))}</div>',
-                unsafe_allow_html=True,
-            )
-            if not settings.get("naver_client_id") or not settings.get("naver_client_secret"):
-                st.markdown(
-                    '<div class="empty-card">Naver 뉴스는 Streamlit Secrets 또는 사이드바에 Naver API 키를 입력하면 사용할 수 있습니다.</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                items = cache.get("items", DEFAULT_NEWS)
-                if items:
-                    st.markdown(news_cards_html(items), unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="empty-card">표시할 Naver 뉴스가 없습니다.</div>', unsafe_allow_html=True)
+        cache = load_news(NEWS_FILE)
+        st.markdown(
+            f'<div class="mini-caption">마지막 갱신: {html.escape(str(cache.get("updated_at", "알 수 없음")))}</div>',
+            unsafe_allow_html=True,
+        )
+        items = cache.get("items", DEFAULT_NEWS)
+        if items:
+            st.markdown(news_cards_html(items), unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="empty-card">표시할 뉴스가 없습니다.</div>', unsafe_allow_html=True)
 
 
 def result_html(result: Dict[str, str]) -> str:
@@ -1421,27 +1335,36 @@ def load_program_archive(path_text: str) -> bytes:
 
 def render_program_download_button() -> None:
     download_url = get_secret_or_env("PROGRAM_DOWNLOAD_URL")
-    if PROGRAM_ARCHIVE.exists():
-        st.download_button(
-            "재활용 프로그램 다운로드",
-            data=load_program_archive(str(PROGRAM_ARCHIVE)),
-            file_name="RecycleHelper.zip",
-            mime="application/zip",
-            use_container_width=True,
-        )
-    elif download_url:
-        st.link_button(
-            "재활용 프로그램 다운로드",
-            download_url,
-            use_container_width=True,
-        )
-    else:
-        st.button(
-            "재활용 프로그램 다운로드",
-            disabled=True,
-            use_container_width=True,
-            help="RecycleHelper.zip을 app.py와 같은 폴더에 두거나 PROGRAM_DOWNLOAD_URL을 설정하세요.",
-        )
+    icon_col, button_col = st.columns([0.18, 0.82], gap="small", vertical_alignment="center")
+
+    with icon_col:
+        if PROGRAM_ICON.exists():
+            st.image(str(PROGRAM_ICON), use_container_width=True)
+        else:
+            st.markdown("<div style='font-size:30px;text-align:center'>📁</div>", unsafe_allow_html=True)
+
+    with button_col:
+        if PROGRAM_ARCHIVE.exists():
+            st.download_button(
+                "재활용 프로그램 다운로드",
+                data=load_program_archive(str(PROGRAM_ARCHIVE)),
+                file_name="RecycleHelper.zip",
+                mime="application/zip",
+                use_container_width=True,
+            )
+        elif download_url:
+            st.link_button(
+                "재활용 프로그램 다운로드",
+                download_url,
+                use_container_width=True,
+            )
+        else:
+            st.button(
+                "재활용 프로그램 다운로드",
+                disabled=True,
+                use_container_width=True,
+                help="RecycleHelper.zip을 app.py와 같은 폴더에 두거나 PROGRAM_DOWNLOAD_URL을 설정하세요.",
+            )
 
 
 def main() -> None:
