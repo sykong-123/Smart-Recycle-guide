@@ -5,6 +5,7 @@ import os
 import re
 import urllib.parse
 import urllib.request
+import urllib.error
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -82,6 +83,7 @@ MODEL_OPTIONS = {
         "GPT-4o": "gpt-4o",
     },
     "ChatKHU": {
+        "Super Agent": "super-agent",
         "Claude 4.6 Sonnet": "claude-4.6-sonnet",
         "Claude 4.5 Sonnet": "claude-4.5-sonnet",
         "Gemini 3.5 Flash": "gemini-3.5-flash",
@@ -91,6 +93,7 @@ MODEL_OPTIONS = {
         "GPT-5.3 Chat": "gpt-5.3-chat",
         "GPT-5.2 Chat": "gpt-5.2-chat",
         "GPT-4.1 mini": "gpt-4.1-mini",
+        "직접 입력": "__custom__",
     },
 }
 
@@ -295,6 +298,30 @@ def build_chatkhu_chat_completions_url() -> str:
     return configured_url + "/chat/completions/"
 
 
+def clean_api_key(api_key: str) -> str:
+    cleaned = (api_key or "").strip()
+    if cleaned.lower().startswith("bearer "):
+        cleaned = cleaned[7:].strip()
+    return cleaned
+
+
+def raise_chatkhu_http_error(exc: urllib.error.HTTPError) -> None:
+    try:
+        body = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        body = ""
+
+    if exc.code == 403:
+        raise RuntimeError(
+            "ChatKHU API가 403 Forbidden을 반환했습니다. API 키가 유효한지, "
+            "키 앞에 Bearer를 중복 입력하지 않았는지, 선택한 모델을 사용할 권한이 있는지 확인해 주세요. "
+            "모델이 의심되면 ChatKHU 모델을 'Super Agent' 또는 '직접 입력'으로 바꿔 시도해 보세요."
+        ) from exc
+
+    detail = f" 응답 내용: {body[:300]}" if body else ""
+    raise RuntimeError(f"ChatKHU API 호출 실패: HTTP {exc.code} {exc.reason}.{detail}") from exc
+
+
 def call_chatkhu_image(
     prompt: str,
     image_bytes: bytes,
@@ -306,7 +333,8 @@ def call_chatkhu_image(
     endpoint = build_chatkhu_chat_completions_url()
     if not endpoint:
         raise ValueError("CHATKHU_API_URL을 Streamlit Secrets 또는 환경변수에 설정해 주세요.")
-    if not api_key.strip():
+    cleaned_api_key = clean_api_key(api_key)
+    if not cleaned_api_key:
         raise ValueError("ChatKHU API 키를 입력해 주세요.")
 
     encoded_image = base64.b64encode(image_bytes).decode("ascii")
@@ -331,14 +359,17 @@ def call_chatkhu_image(
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key.strip()}",
-            "x-api-key": api_key.strip(),
+            "Authorization": f"Bearer {cleaned_api_key}",
+            "x-api-key": cleaned_api_key,
         },
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=60) as response:
-        data = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise_chatkhu_http_error(exc)
 
     for key in ("output_text", "text", "content", "answer", "result"):
         value = data.get(key)
@@ -363,7 +394,8 @@ def call_chatkhu_text(
     endpoint = build_chatkhu_chat_completions_url()
     if not endpoint:
         raise ValueError("CHATKHU_API_URL을 Streamlit Secrets 또는 환경변수에 설정해 주세요.")
-    if not api_key.strip():
+    cleaned_api_key = clean_api_key(api_key)
+    if not cleaned_api_key:
         raise ValueError("ChatKHU API 키를 입력해 주세요.")
 
     payload = {
@@ -375,14 +407,17 @@ def call_chatkhu_text(
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key.strip()}",
-            "x-api-key": api_key.strip(),
+            "Authorization": f"Bearer {cleaned_api_key}",
+            "x-api-key": cleaned_api_key,
         },
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=60) as response:
-        data = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise_chatkhu_http_error(exc)
 
     for key in ("output_text", "text", "content", "answer", "result"):
         value = data.get(key)
@@ -1037,6 +1072,13 @@ def render_sidebar() -> Dict[str, Any]:
             key="chatkhu_model_name",
         )
         model_name = MODEL_OPTIONS["ChatKHU"][selected_model]
+        if model_name == "__custom__":
+            model_name = st.sidebar.text_input(
+                "ChatKHU 모델 ID 직접 입력",
+                value=default_chatkhu_value or "super-agent",
+                help="ChatKHU 개발자 문서의 모델 목록 API에서 확인한 model id를 입력하세요.",
+                key="chatkhu_custom_model_name",
+            )
         if not get_secret_or_env("CHATKHU_API_URL"):
             st.sidebar.warning("ChatKHU를 쓰려면 CHATKHU_API_URL을 Secrets 또는 환경변수에 설정해야 합니다.")
     else:
