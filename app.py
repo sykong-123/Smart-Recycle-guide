@@ -298,11 +298,62 @@ def build_chatkhu_chat_completions_url() -> str:
     return configured_url + "/chat/completions/"
 
 
+def build_chatkhu_models_url() -> str:
+    configured_url = get_secret_or_env("CHATKHU_API_URL").strip().rstrip("/")
+    if not configured_url:
+        return ""
+    if configured_url.endswith("/chat/completions"):
+        configured_url = configured_url[: -len("/chat/completions")]
+    return configured_url.rstrip("/") + "/models/"
+
+
 def clean_api_key(api_key: str) -> str:
     cleaned = (api_key or "").strip()
     if cleaned.lower().startswith("bearer "):
         cleaned = cleaned[7:].strip()
     return cleaned
+
+
+def chatkhu_headers(api_key: str) -> Dict[str, str]:
+    cleaned_api_key = clean_api_key(api_key)
+    return {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {cleaned_api_key}",
+    }
+
+
+@st.cache_data(ttl=10 * 60, show_spinner=False)
+def fetch_chatkhu_model_options(api_key: str) -> Dict[str, str]:
+    endpoint = build_chatkhu_models_url()
+    cleaned_api_key = clean_api_key(api_key)
+    if not endpoint or not cleaned_api_key:
+        return {}
+
+    request = urllib.request.Request(
+        endpoint,
+        headers=chatkhu_headers(cleaned_api_key),
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return {}
+
+    raw_models = data.get("data", data.get("models", data if isinstance(data, list) else []))
+    if not isinstance(raw_models, list):
+        return {}
+
+    options: Dict[str, str] = {}
+    for item in raw_models:
+        if isinstance(item, str):
+            options[item] = item
+        elif isinstance(item, dict):
+            model_id = str(item.get("id") or item.get("model") or item.get("name") or "").strip()
+            label = str(item.get("display_name") or item.get("name") or model_id).strip()
+            if model_id:
+                options[label] = model_id
+    return options
 
 
 def raise_chatkhu_http_error(exc: urllib.error.HTTPError) -> None:
@@ -358,9 +409,7 @@ def call_chatkhu_image(
         endpoint,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {cleaned_api_key}",
-            "x-api-key": cleaned_api_key,
+            **chatkhu_headers(cleaned_api_key),
         },
         method="POST",
     )
@@ -406,9 +455,7 @@ def call_chatkhu_text(
         endpoint,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {cleaned_api_key}",
-            "x-api-key": cleaned_api_key,
+            **chatkhu_headers(cleaned_api_key),
         },
         method="POST",
     )
@@ -1058,11 +1105,18 @@ def render_sidebar() -> Dict[str, Any]:
             help="로컬 실행 시 keyring에 저장된 키를 자동으로 불러올 수 있습니다.",
             key="chatkhu_api_key",
         )
-        chatkhu_labels = list(MODEL_OPTIONS["ChatKHU"].keys())
+        fetched_chatkhu_options = fetch_chatkhu_model_options(api_key)
+        chatkhu_options = fetched_chatkhu_options or MODEL_OPTIONS["ChatKHU"]
+        if fetched_chatkhu_options:
+            st.sidebar.success("ChatKHU에서 사용 가능한 모델 목록을 불러왔습니다.")
+        else:
+            st.sidebar.caption("모델 목록을 불러오지 못하면 기본 후보 목록을 사용합니다.")
+
+        chatkhu_labels = list(chatkhu_options.keys())
         default_chatkhu_value = get_secret_or_env("CHATKHU_MODEL_NAME")
         default_chatkhu_index = 0
         for index, label in enumerate(chatkhu_labels):
-            if MODEL_OPTIONS["ChatKHU"][label] == default_chatkhu_value:
+            if chatkhu_options[label] == default_chatkhu_value:
                 default_chatkhu_index = index
                 break
         selected_model = st.sidebar.selectbox(
@@ -1071,7 +1125,7 @@ def render_sidebar() -> Dict[str, Any]:
             index=default_chatkhu_index,
             key="chatkhu_model_name",
         )
-        model_name = MODEL_OPTIONS["ChatKHU"][selected_model]
+        model_name = chatkhu_options[selected_model]
         if model_name == "__custom__":
             model_name = st.sidebar.text_input(
                 "ChatKHU 모델 ID 직접 입력",
