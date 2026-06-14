@@ -23,6 +23,7 @@ IMAGE_DIR = DATA_DIR / "history_images"
 HISTORY_FILE = DATA_DIR / "waste_history.json"
 NEWS_FILE = DATA_DIR / "news_cache.json"
 NAVER_NEWS_FILE = DATA_DIR / "naver_news_cache.json"
+PROGRAM_ARCHIVE = BASE_DIR / "RecycleHelper.zip"
 
 MAX_HISTORY = 50
 MAX_NEWS = 6
@@ -109,6 +110,47 @@ def get_secret_or_env(name: str) -> str:
         return str(st.secrets.get(name, ""))
     except Exception:
         return ""
+
+
+def get_keyring_secret(name: str) -> str:
+    """Read an API key from the local desktop keyring when available.
+
+    Streamlit Cloud runs on a remote server, so this is mainly useful when the
+    same app is executed locally on a teammate's computer.
+    """
+    try:
+        import keyring
+    except Exception:
+        return ""
+
+    service_candidates = [
+        "RecycleHelper",
+        "SmartRecycleGuide",
+        "ChatKHU",
+        "chatkhuapi",
+    ]
+    account_candidates = [
+        name,
+        name.lower(),
+        name.replace("_API_KEY", ""),
+        name.replace("_", "-").lower(),
+        "api_key",
+        "default",
+    ]
+
+    for service in service_candidates:
+        for account in account_candidates:
+            try:
+                value = keyring.get_password(service, account)
+            except Exception:
+                value = None
+            if value:
+                return value
+    return ""
+
+
+def get_secret_env_or_keyring(name: str) -> str:
+    return get_secret_or_env(name) or get_keyring_secret(name)
 
 
 def safe_json_from_text(raw_text: str) -> Any:
@@ -216,6 +258,95 @@ def call_openai_image(
     return response.output_text or ""
 
 
+def call_chatkhu_image(
+    prompt: str,
+    image_bytes: bytes,
+    mime_type: str,
+    api_key: str,
+    model_name: str,
+) -> str:
+    """Call a ChatKHU-compatible image API.
+
+    Configure CHATKHU_API_URL in Streamlit Secrets/env. The endpoint is expected
+    to accept JSON with prompt, image_base64, mime_type, and model fields.
+    """
+    endpoint = get_secret_or_env("CHATKHU_API_URL")
+    if not endpoint:
+        raise ValueError("CHATKHU_API_URL을 Streamlit Secrets 또는 환경변수에 설정해 주세요.")
+    if not api_key.strip():
+        raise ValueError("ChatKHU API 키를 입력해 주세요.")
+
+    payload = {
+        "prompt": prompt,
+        "image_base64": base64.b64encode(image_bytes).decode("ascii"),
+        "mime_type": mime_type or "image/jpeg",
+        "model": model_name.strip(),
+    }
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key.strip()}",
+            "X-API-Key": api_key.strip(),
+        },
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=60) as response:
+        data = json.loads(response.read().decode("utf-8"))
+
+    for key in ("output_text", "text", "content", "answer", "result"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+
+    raise ValueError("ChatKHU API 응답에서 텍스트 결과를 찾지 못했습니다.")
+
+
+def call_chatkhu_text(
+    prompt: str,
+    api_key: str,
+    model_name: str,
+) -> str:
+    endpoint = get_secret_or_env("CHATKHU_API_URL")
+    if not endpoint:
+        raise ValueError("CHATKHU_API_URL을 Streamlit Secrets 또는 환경변수에 설정해 주세요.")
+    if not api_key.strip():
+        raise ValueError("ChatKHU API 키를 입력해 주세요.")
+
+    payload = {
+        "prompt": prompt,
+        "model": model_name.strip(),
+    }
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key.strip()}",
+            "X-API-Key": api_key.strip(),
+        },
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=60) as response:
+        data = json.loads(response.read().decode("utf-8"))
+
+    for key in ("output_text", "text", "content", "answer", "result"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    raise ValueError("ChatKHU API 응답에서 텍스트 결과를 찾지 못했습니다.")
+
+
 def call_ai_text(
     provider: str,
     prompt: str,
@@ -224,6 +355,8 @@ def call_ai_text(
 ) -> str:
     if provider == "OpenAI (GPT)":
         return call_openai_text(prompt, api_key, model_name)
+    if provider == "ChatKHU":
+        return call_chatkhu_text(prompt, api_key, model_name)
     return call_gemini_text(prompt, api_key, model_name)
 
 
@@ -237,6 +370,14 @@ def call_ai_image(
 ) -> str:
     if provider == "OpenAI (GPT)":
         return call_openai_image(
+            prompt=prompt,
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            api_key=api_key,
+            model_name=model_name,
+        )
+    if provider == "ChatKHU":
+        return call_chatkhu_image(
             prompt=prompt,
             image_bytes=image_bytes,
             mime_type=mime_type,
@@ -849,7 +990,7 @@ def render_sidebar() -> Dict[str, Any]:
     st.sidebar.markdown("### AI 연결")
     provider = st.sidebar.selectbox(
         "AI 제공자",
-        ["Gemini", "OpenAI (GPT)"],
+        ["Gemini", "OpenAI (GPT)", "ChatKHU"],
         help="사진 분석과 뉴스 AI 요약에 사용할 서비스를 선택합니다.",
     )
     test_mode = st.sidebar.toggle(
@@ -859,8 +1000,10 @@ def render_sidebar() -> Dict[str, Any]:
     )
 
     if provider == "OpenAI (GPT)":
+        existing_key = get_secret_env_or_keyring("OPENAI_API_KEY")
         api_key = st.sidebar.text_input(
             "OpenAI API 키",
+            value=existing_key,
             type="password",
             placeholder="사용자 본인의 OpenAI API 키를 입력하세요",
             help="입력한 키는 파일에 저장되지 않습니다.",
@@ -871,9 +1014,28 @@ def render_sidebar() -> Dict[str, Any]:
             value="gpt-4.1-mini",
             key="openai_model_name",
         )
+    elif provider == "ChatKHU":
+        existing_key = get_secret_env_or_keyring("CHATKHU_API_KEY")
+        api_key = st.sidebar.text_input(
+            "ChatKHU API 키",
+            value=existing_key,
+            type="password",
+            placeholder="keyring, Secrets 또는 직접 입력으로 사용할 수 있습니다",
+            help="로컬 실행 시 keyring에 저장된 키를 자동으로 불러올 수 있습니다.",
+            key="chatkhu_api_key",
+        )
+        model_name = st.sidebar.text_input(
+            "ChatKHU 모델명",
+            value=get_secret_or_env("CHATKHU_MODEL_NAME") or "chatkhu-vision",
+            key="chatkhu_model_name",
+        )
+        if not get_secret_or_env("CHATKHU_API_URL"):
+            st.sidebar.warning("ChatKHU를 쓰려면 CHATKHU_API_URL을 Secrets 또는 환경변수에 설정해야 합니다.")
     else:
+        existing_key = get_secret_env_or_keyring("GEMINI_API_KEY")
         api_key = st.sidebar.text_input(
             "Gemini API 키",
+            value=existing_key,
             type="password",
             placeholder="사용자 본인의 Gemini API 키를 입력하세요",
             help="입력한 키는 파일에 저장되지 않습니다.",
@@ -1252,6 +1414,36 @@ def render_analysis_panel(settings: Dict[str, Any]) -> None:
     render_history()
 
 
+@st.cache_data(show_spinner=False)
+def load_program_archive(path_text: str) -> bytes:
+    return Path(path_text).read_bytes()
+
+
+def render_program_download_button() -> None:
+    download_url = get_secret_or_env("PROGRAM_DOWNLOAD_URL")
+    if PROGRAM_ARCHIVE.exists():
+        st.download_button(
+            "재활용 프로그램 다운로드",
+            data=load_program_archive(str(PROGRAM_ARCHIVE)),
+            file_name="RecycleHelper.zip",
+            mime="application/zip",
+            use_container_width=True,
+        )
+    elif download_url:
+        st.link_button(
+            "재활용 프로그램 다운로드",
+            download_url,
+            use_container_width=True,
+        )
+    else:
+        st.button(
+            "재활용 프로그램 다운로드",
+            disabled=True,
+            use_container_width=True,
+            help="RecycleHelper.zip을 app.py와 같은 폴더에 두거나 PROGRAM_DOWNLOAD_URL을 설정하세요.",
+        )
+
+
 def main() -> None:
     st.set_page_config(
         page_title=APP_TITLE,
@@ -1268,6 +1460,11 @@ def main() -> None:
         if settings["test_mode"]
         else f"실제 AI 모드 · {settings['provider']}"
     )
+
+    _, download_col = st.columns([2.7, 1])
+    with download_col:
+        render_program_download_button()
+
     st.markdown(
         f"""
 <div class="hero-wrap">
