@@ -55,9 +55,16 @@ REQUIRED_RESULT_KEYS = [
     "품목명",
     "쓰레기 종류",
     "배출 방법",
+    "오염도 및 세척 여부",
     "자취생 꿀팁",
     "관련 법안 한 줄 요약",
     "주의사항",
+]
+
+CONTAMINATION_KEYS = [
+    "오염도 판정",
+    "세척 여부",
+    "권장 배출",
 ]
 
 
@@ -258,6 +265,10 @@ def build_analysis_prompt(item_hint: str) -> str:
 - 지역별 분리배출 기준이 다를 수 있다는 점을 반영하세요.
 - 확실하지 않은 법률 조항 번호나 과태료 금액을 지어내지 마세요.
 - 법안 항목은 대한민국의 일반적인 분리배출·폐기물 관리 원칙을 한 문장으로 요약하세요.
+- "오염도 및 세척 여부"는 반드시 아래 3개 하위 키를 가진 JSON 객체로 작성하세요.
+  - 오염도 판정: 깨끗함 / 약간 오염 / 심한 오염 / 판단 어려움 중 하나와 짧은 근거
+  - 세척 여부: 필요 없음 / 가볍게 헹굼 / 세척 필수 / 세척해도 재활용 어려움 중 하나
+  - 권장 배출: 바로 재활용 / 세척 후 재활용 / 일반쓰레기 권장 / 지자체 확인 필요 중 하나
 - 답변은 설명문 없이 JSON 객체 하나만 출력하세요.
 
 반드시 포함할 키:
@@ -269,7 +280,13 @@ def normalize_result(result: Dict[str, Any]) -> Dict[str, str]:
     normalized: Dict[str, str] = {}
     for key in REQUIRED_RESULT_KEYS:
         value = result.get(key, "정보 없음")
-        normalized[key] = str(value).strip() or "정보 없음"
+        if key == "오염도 및 세척 여부" and isinstance(value, dict):
+            lines = []
+            for sub_key in CONTAMINATION_KEYS:
+                lines.append(f"- {sub_key}: {value.get(sub_key, '정보 없음')}")
+            normalized[key] = "\n".join(lines)
+        else:
+            normalized[key] = str(value).strip() or "정보 없음"
     return normalized
 
 
@@ -281,6 +298,11 @@ def mock_analysis(item_hint: str, has_image: bool) -> Dict[str, str]:
             "품목명": "투명 페트병",
             "쓰레기 종류": "플라스틱류",
             "배출 방법": "내용물을 비우고 라벨을 제거한 뒤 압착하여 투명 페트병 수거함에 배출하세요.",
+            "오염도 및 세척 여부": {
+                "오염도 판정": "깨끗함 또는 약간 오염: 내부에 음료가 조금 남아 있을 수 있습니다.",
+                "세척 여부": "가볍게 헹굼",
+                "권장 배출": "세척 후 재활용",
+            },
             "자취생 꿀팁": "병 안을 한 번 헹구고 부피를 줄이면 보관 공간을 아낄 수 있습니다.",
             "관련 법안 한 줄 요약": "재활용품은 내용물을 비우고 이물질을 제거해 재질별로 분리배출하는 것이 기본 원칙입니다.",
             "주의사항": "뚜껑 처리 방식은 지자체별로 다를 수 있으니 지역 안내를 확인하세요.",
@@ -290,6 +312,11 @@ def mock_analysis(item_hint: str, has_image: bool) -> Dict[str, str]:
             "품목명": "종이 상자",
             "쓰레기 종류": "종이류",
             "배출 방법": "테이프와 송장 등 다른 재질을 제거하고 상자를 펼쳐 종이류로 배출하세요.",
+            "오염도 및 세척 여부": {
+                "오염도 판정": "약간 오염: 테이프나 송장처럼 다른 재질이 붙어 있을 수 있습니다.",
+                "세척 여부": "세척보다 이물질 제거 필요",
+                "권장 배출": "이물질 제거 후 재활용",
+            },
             "자취생 꿀팁": "오염된 부분만 잘라내면 깨끗한 부분은 종이류로 분리할 수 있습니다.",
             "관련 법안 한 줄 요약": "재활용 가능한 종이는 비닐과 테이프 등 이물질을 제거한 뒤 분리배출해야 합니다.",
             "주의사항": "음식물과 기름이 심하게 묻은 종이는 일반쓰레기로 분류될 수 있습니다.",
@@ -299,6 +326,11 @@ def mock_analysis(item_hint: str, has_image: bool) -> Dict[str, str]:
             "품목명": "배달 음식 용기",
             "쓰레기 종류": "플라스틱류 또는 일반쓰레기",
             "배출 방법": "음식물을 비우고 씻은 뒤 깨끗하면 플라스틱류로, 오염이 제거되지 않으면 일반쓰레기로 배출하세요.",
+            "오염도 및 세척 여부": {
+                "오염도 판정": "심한 오염: 양념, 기름, 음식물 자국이 남아 있을 가능성이 큽니다.",
+                "세척 여부": "세척 필수",
+                "권장 배출": "세척 후 재활용, 세척해도 착색·기름기가 남으면 일반쓰레기 권장",
+            },
             "자취생 꿀팁": "키친타월로 기름을 먼저 닦은 뒤 세척하면 물 사용량과 냄새를 줄일 수 있습니다.",
             "관련 법안 한 줄 요약": "오염된 재활용품은 선별을 방해하므로 이물질을 제거한 뒤 배출해야 합니다.",
             "주의사항": "검은색 플라스틱과 복합재질은 지역 선별 기준에 따라 재활용이 제한될 수 있습니다.",
@@ -308,6 +340,11 @@ def mock_analysis(item_hint: str, has_image: bool) -> Dict[str, str]:
             "품목명": name or ("사진 속 쓰레기" if has_image else "미확인 품목"),
             "쓰레기 종류": "테스트 모드 분석 결과",
             "배출 방법": "내용물을 비우고 세척한 뒤 재질 표시를 확인하여 지역 분리배출 기준에 맞게 배출하세요.",
+            "오염도 및 세척 여부": {
+                "오염도 판정": "판단 어려움: 테스트 모드라 실제 사진 오염도를 판독하지 않습니다.",
+                "세척 여부": "가볍게 헹굼 또는 세척 필수",
+                "권장 배출": "재질 표시와 오염 상태 확인 후 배출",
+            },
             "자취생 꿀팁": "싱크대 옆에 작은 세척용 솔을 두면 배달 용기와 병을 빠르게 씻을 수 있습니다.",
             "관련 법안 한 줄 요약": "생활폐기물은 지자체가 정한 방법과 장소에 맞게 분리배출해야 합니다.",
             "주의사항": "현재는 테스트 모드이므로 실제 사진 판독 결과가 아닙니다.",
@@ -777,7 +814,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 .result-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
 .result-card { padding:14px; border:1px solid var(--line); border-radius:13px; background:white; }
 .result-card strong { display:block; margin-bottom:6px; color:var(--green-dark); font-size:13px; }
-.result-card p { margin:0; line-height:1.58; font-size:14px; }
+.result-card p { margin:0; line-height:1.58; font-size:14px; white-space:pre-line; }
 .history-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(185px,1fr)); gap:12px; }
 .history-card { overflow:hidden; border-radius:14px; border:1px solid var(--line); background:white; }
 .history-card img { width:100%; height:125px; display:block; object-fit:cover; background:#edf2ed; }
