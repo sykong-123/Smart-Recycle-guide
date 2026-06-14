@@ -284,6 +284,17 @@ def call_openai_image(
     return response.output_text or ""
 
 
+def build_chatkhu_chat_completions_url() -> str:
+    configured_url = get_secret_or_env("CHATKHU_API_URL").strip().rstrip("/")
+    if not configured_url:
+        return ""
+    if configured_url.endswith("/chat/completions"):
+        return configured_url + "/"
+    if configured_url.endswith("/chat/completions/"):
+        return configured_url
+    return configured_url + "/chat/completions/"
+
+
 def call_chatkhu_image(
     prompt: str,
     image_bytes: bytes,
@@ -291,22 +302,29 @@ def call_chatkhu_image(
     api_key: str,
     model_name: str,
 ) -> str:
-    """Call a ChatKHU-compatible image API.
-
-    Configure CHATKHU_API_URL in Streamlit Secrets/env. The endpoint is expected
-    to accept JSON with prompt, image_base64, mime_type, and model fields.
-    """
-    endpoint = get_secret_or_env("CHATKHU_API_URL")
+    """Call ChatKHU through its OpenAI-compatible Chat Completions endpoint."""
+    endpoint = build_chatkhu_chat_completions_url()
     if not endpoint:
         raise ValueError("CHATKHU_API_URL을 Streamlit Secrets 또는 환경변수에 설정해 주세요.")
     if not api_key.strip():
         raise ValueError("ChatKHU API 키를 입력해 주세요.")
 
+    encoded_image = base64.b64encode(image_bytes).decode("ascii")
+    image_data_url = f"data:{mime_type or 'image/jpeg'};base64,{encoded_image}"
     payload = {
-        "prompt": prompt,
-        "image_base64": base64.b64encode(image_bytes).decode("ascii"),
-        "mime_type": mime_type or "image/jpeg",
         "model": model_name.strip(),
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": image_data_url},
+                    },
+                ],
+            }
+        ],
     }
     request = urllib.request.Request(
         endpoint,
@@ -314,7 +332,7 @@ def call_chatkhu_image(
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key.strip()}",
-            "X-API-Key": api_key.strip(),
+            "x-api-key": api_key.strip(),
         },
         method="POST",
     )
@@ -342,15 +360,15 @@ def call_chatkhu_text(
     api_key: str,
     model_name: str,
 ) -> str:
-    endpoint = get_secret_or_env("CHATKHU_API_URL")
+    endpoint = build_chatkhu_chat_completions_url()
     if not endpoint:
         raise ValueError("CHATKHU_API_URL을 Streamlit Secrets 또는 환경변수에 설정해 주세요.")
     if not api_key.strip():
         raise ValueError("ChatKHU API 키를 입력해 주세요.")
 
     payload = {
-        "prompt": prompt,
         "model": model_name.strip(),
+        "messages": [{"role": "user", "content": prompt}],
     }
     request = urllib.request.Request(
         endpoint,
@@ -358,7 +376,7 @@ def call_chatkhu_text(
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key.strip()}",
-            "X-API-Key": api_key.strip(),
+            "x-api-key": api_key.strip(),
         },
         method="POST",
     )
@@ -370,6 +388,12 @@ def call_chatkhu_text(
         value = data.get(key)
         if isinstance(value, str) and value.strip():
             return value
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
     raise ValueError("ChatKHU API 응답에서 텍스트 결과를 찾지 못했습니다.")
 
 
