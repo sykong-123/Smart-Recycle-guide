@@ -54,7 +54,7 @@ GEMINI_FALLBACK_MODELS = [
 
 
 def get_secret_or_env(name: str) -> Optional[str]:
-    """Read optional API keys safely from env or Streamlit secrets."""
+    """Read optional keys safely from env or Streamlit secrets."""
     if os.getenv(name):
         return os.getenv(name)
 
@@ -70,12 +70,8 @@ def strip_html(text: str) -> str:
 
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)
-def fetch_news_from_rss(query: str, max_items: int = 5) -> List[Dict[str, str]]:
-    """Fetch recent recycling news from Google News RSS.
-
-    This keeps the app dependency-light. If internet access fails, callers can
-    fall back to the local mock timeline.
-    """
+def fetch_google_news(query: str, max_items: int = 5) -> List[Dict[str, str]]:
+    """Fetch recent recycling news from Google News RSS."""
     encoded_query = urllib.parse.quote(query)
     url = (
         "https://news.google.com/rss/search?"
@@ -97,7 +93,7 @@ def fetch_news_from_rss(query: str, max_items: int = 5) -> List[Dict[str, str]]:
         title = strip_html(item.findtext("title", "제목 없음"))
         summary = strip_html(item.findtext("description", ""))
         link = item.findtext("link", "")
-        source = item.findtext("source", "뉴스")
+        source = item.findtext("source", "Google News")
         pub_date = item.findtext("pubDate", "")
 
         try:
@@ -118,29 +114,61 @@ def fetch_news_from_rss(query: str, max_items: int = 5) -> List[Dict[str, str]]:
     return items
 
 
-def render_news_timeline(auto_fetch_news: bool, news_query: str) -> None:
-    """Render recycling news/law timeline.
+@st.cache_data(ttl=60 * 60, show_spinner=False)
+def fetch_naver_news(
+    query: str,
+    max_items: int = 5,
+    _client_id: Optional[str] = None,
+    _client_secret: Optional[str] = None,
+) -> List[Dict[str, str]]:
+    """Fetch recent news from Naver Search API."""
+    if not _client_id or not _client_secret:
+        raise ValueError("Streamlit Secrets에 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET을 설정해 주세요.")
 
-    The app first tries RSS-based live news when enabled. If network access is
-    unavailable, it automatically falls back to local sample data.
-    """
-    st.subheader("📰 최신 분리수거 뉴스 & 법안 타임라인")
+    params = urllib.parse.urlencode(
+        {
+            "query": query,
+            "display": max_items,
+            "start": 1,
+            "sort": "date",
+        }
+    )
+    url = f"https://openapi.naver.com/v1/search/news.json?{params}"
 
-    if st.button("🔄 뉴스 새로고침", use_container_width=True):
-        fetch_news_from_rss.clear()
-        st.rerun()
+    request = urllib.request.Request(
+        url,
+        headers={
+            "X-Naver-Client-Id": _client_id,
+            "X-Naver-Client-Secret": _client_secret,
+            "User-Agent": "SmartRecycleGuide/1.0",
+        },
+    )
 
-    if auto_fetch_news:
+    with urllib.request.urlopen(request, timeout=7) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    items: List[Dict[str, str]] = []
+    for item in payload.get("items", [])[:max_items]:
+        pub_date = item.get("pubDate", "")
         try:
-            timeline_items = fetch_news_from_rss(news_query)
-            st.caption("Google News RSS에서 최신 기사를 가져왔어요.")
-        except Exception as exc:
-            timeline_items = FALLBACK_NEWS
-            st.warning(f"뉴스 자동 수집에 실패해서 예시 데이터를 보여드려요. ({exc})")
-    else:
-        timeline_items = FALLBACK_NEWS
-        st.caption("자동 수집이 꺼져 있어 예시 데이터를 표시 중이에요.")
+            date_text = parsedate_to_datetime(pub_date).strftime("%Y.%m.%d")
+        except Exception:
+            date_text = datetime.now().strftime("%Y.%m.%d")
 
+        items.append(
+            {
+                "date": date_text,
+                "title": strip_html(item.get("title", "제목 없음")),
+                "summary": strip_html(item.get("description", "")),
+                "source": "Naver News",
+                "link": item.get("originallink") or item.get("link", ""),
+            }
+        )
+
+    return items
+
+
+def render_news_cards(timeline_items: List[Dict[str, str]]) -> None:
     for item in timeline_items:
         with st.container(border=True):
             st.markdown(f"**{item['date']} · {item['title']}**")
@@ -149,6 +177,55 @@ def render_news_timeline(auto_fetch_news: bool, news_query: str) -> None:
             st.caption(f"출처: {item.get('source', '뉴스')}")
             if item.get("link"):
                 st.link_button("기사 열기", item["link"], use_container_width=True)
+
+
+def render_news_timeline(
+    auto_fetch_news: bool,
+    news_query: str,
+    naver_client_id: Optional[str],
+    naver_client_secret: Optional[str],
+) -> None:
+    """Render Google/Naver news tabs with fallback data."""
+    st.subheader("📰 최신 분리수거 뉴스 & 법안 타임라인")
+
+    if st.button("🔄 뉴스 새로고침", use_container_width=True):
+        fetch_google_news.clear()
+        fetch_naver_news.clear()
+        st.rerun()
+
+    google_tab, naver_tab = st.tabs(["Google 뉴스", "Naver 뉴스"])
+
+    with google_tab:
+        if auto_fetch_news:
+            try:
+                google_items = fetch_google_news(news_query)
+                st.caption("Google News RSS에서 최신 기사를 가져왔어요.")
+            except Exception as exc:
+                google_items = FALLBACK_NEWS
+                st.warning(f"Google 뉴스 수집에 실패해서 예시 데이터를 보여드려요. ({exc})")
+        else:
+            google_items = FALLBACK_NEWS
+            st.caption("자동 수집이 꺼져 있어 예시 데이터를 표시 중이에요.")
+
+        render_news_cards(google_items)
+
+    with naver_tab:
+        if auto_fetch_news:
+            try:
+                naver_items = fetch_naver_news(
+                    news_query,
+                    _client_id=naver_client_id,
+                    _client_secret=naver_client_secret,
+                )
+                st.caption("Naver 검색 API에서 최신 기사를 가져왔어요.")
+            except Exception as exc:
+                naver_items = FALLBACK_NEWS
+                st.warning(f"Naver 뉴스 수집에 실패해서 예시 데이터를 보여드려요. ({exc})")
+        else:
+            naver_items = FALLBACK_NEWS
+            st.caption("자동 수집이 꺼져 있어 예시 데이터를 표시 중이에요.")
+
+        render_news_cards(naver_items)
 
 
 def build_ai_prompt(item_name: Optional[str], has_image: bool) -> str:
@@ -347,9 +424,8 @@ def analyze_recycling(
 def render_result(result: Dict[str, str]) -> None:
     st.subheader("✅ AI 분리수거 분석 결과")
 
-    # Avoid st.table here because some local pandas/numpy installs can fail with
-    # binary compatibility errors. Markdown containers keep the same information
-    # visible without requiring pandas.
+    # Avoid st.table because some local pandas/numpy installs can fail with
+    # binary compatibility errors.
     for key in REQUIRED_FIELDS:
         with st.container(border=True):
             st.markdown(f"**{key}**")
@@ -405,6 +481,26 @@ def render_settings_panel() -> Dict[str, object]:
         value="분리수거 재활용 과태료 배출",
     )
 
+    naver_client_id = get_secret_or_env("NAVER_CLIENT_ID") or ""
+    naver_client_secret = get_secret_or_env("NAVER_CLIENT_SECRET") or ""
+
+    if naver_client_id and naver_client_secret:
+        st.sidebar.success("Naver 검색 API 키가 Secrets에 설정되어 있어요.")
+    else:
+        st.sidebar.warning("Naver 뉴스 탭을 쓰려면 Streamlit Secrets에 Naver API 키를 설정하세요.")
+        naver_client_id = st.sidebar.text_input(
+            "Naver Client ID",
+            value=naver_client_id,
+            type="password",
+            help="로컬 테스트용 입력칸입니다. GitHub 코드에는 저장되지 않습니다.",
+        )
+        naver_client_secret = st.sidebar.text_input(
+            "Naver Client Secret",
+            value=naver_client_secret,
+            type="password",
+            help="로컬 테스트용 입력칸입니다. GitHub 코드에는 저장되지 않습니다.",
+        )
+
     return {
         "use_mock": use_mock,
         "provider": provider,
@@ -412,6 +508,8 @@ def render_settings_panel() -> Dict[str, object]:
         "model_name": model_name,
         "auto_fetch_news": auto_fetch_news,
         "news_query": news_query,
+        "naver_client_id": naver_client_id,
+        "naver_client_secret": naver_client_secret,
     }
 
 
@@ -419,13 +517,22 @@ def render_ai_panel(settings: Dict[str, object]) -> None:
     st.subheader("📸 AI 스마트 분리수거 카메라")
     st.caption("사진을 올리거나 물건 이름을 입력하면 분리배출 방법을 알려드려요.")
 
+    camera_file = st.camera_input(
+        "📷 분리수거할 물건을 카메라로 찍어주세요",
+        help="스마트폰 카메라나 노트북 웹캠으로 바로 촬영할 수 있어요.",
+    )
+
     uploaded_file = st.file_uploader(
         "쓰레기 사진 업로드",
         type=["jpg", "jpeg", "png", "webp"],
         help="예: 배달 용기, 컵라면 용기, 페트병, 택배 상자 사진",
     )
 
-    if uploaded_file is not None:
+    analysis_file = camera_file or uploaded_file
+
+    if camera_file is not None:
+        st.success("방금 촬영한 사진을 분석에 사용할게요.")
+    elif uploaded_file is not None:
         st.image(uploaded_file, caption="업로드한 이미지", use_container_width=True)
 
     item_name = st.text_input(
@@ -439,15 +546,15 @@ def render_ai_panel(settings: Dict[str, object]) -> None:
         st.warning("💸 실제 API 모드 ON: 버튼을 누르면 입력한 API 키로 비용이 발생할 수 있습니다.")
 
     if st.button("🔎 분리수거 방법 확인하기", type="primary", use_container_width=True):
-        if uploaded_file is None and not item_name.strip():
-            st.error("사진을 업로드하거나 물건 이름을 입력해 주세요.")
+        if analysis_file is None and not item_name.strip():
+            st.error("카메라로 사진을 찍거나, 사진을 업로드하거나, 물건 이름을 입력해 주세요.")
             return
 
         with st.spinner("분리배출 방법을 확인하는 중이에요..."):
             try:
                 result = analyze_recycling(
                     item_name=item_name,
-                    uploaded_file=uploaded_file,
+                    uploaded_file=analysis_file,
                     use_mock=bool(settings["use_mock"]),
                     provider=str(settings["provider"]),
                     api_key=str(settings["api_key"]),
@@ -456,7 +563,7 @@ def render_ai_panel(settings: Dict[str, object]) -> None:
             except Exception as exc:
                 st.error(f"AI API 호출에 실패했어요: {exc}")
                 st.info("대신 테스트 모드 목업 결과를 보여드릴게요.")
-                result = get_mock_result(item_name, uploaded_file is not None)
+                result = get_mock_result(item_name, analysis_file is not None)
 
         render_result(result)
 
@@ -481,6 +588,8 @@ def render_main_ui() -> None:
         render_news_timeline(
             auto_fetch_news=bool(settings["auto_fetch_news"]),
             news_query=str(settings["news_query"]),
+            naver_client_id=str(settings["naver_client_id"]),
+            naver_client_secret=str(settings["naver_client_secret"]),
         )
 
     with right_col:
