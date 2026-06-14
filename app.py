@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Dict, List
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -25,6 +26,7 @@ NAVER_NEWS_FILE = DATA_DIR / "naver_news_cache.json"
 
 MAX_HISTORY = 50
 MAX_NEWS = 6
+KST = ZoneInfo("Asia/Seoul")
 
 DEFAULT_NEWS = [
     {
@@ -62,6 +64,11 @@ REQUIRED_RESULT_KEYS = [
 def ensure_storage() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def now_kst() -> datetime:
+    """Return current Korea time for records shown to users."""
+    return datetime.now(KST)
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -343,7 +350,7 @@ def save_history_image(image_bytes: bytes, mime_type: str) -> str:
         "image/webp": ".webp",
     }
     extension = extension_map.get(mime_type, ".jpg")
-    filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}{extension}"
+    filename = f"{now_kst().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}{extension}"
     path = IMAGE_DIR / filename
     path.write_bytes(image_bytes)
     return str(path.relative_to(BASE_DIR))
@@ -358,7 +365,7 @@ def add_history(result: Dict[str, str], image_bytes: bytes, mime_type: str) -> N
         0,
         {
             "id": uuid4().hex,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "created_at": now_kst().strftime("%Y-%m-%d %H:%M:%S"),
             "image_path": image_path,
             "result": result,
         },
@@ -425,7 +432,7 @@ def fetch_google_news(query: str, max_items: int = MAX_NEWS) -> List[Dict[str, s
         try:
             published = parsedate_to_datetime(pub_date).strftime("%Y.%m.%d %H:%M")
         except Exception:
-            published = datetime.now().strftime("%Y.%m.%d %H:%M")
+            published = now_kst().strftime("%Y.%m.%d %H:%M")
         items.append(
             {
                 "published": published,
@@ -480,7 +487,7 @@ def fetch_naver_news(
         try:
             published = parsedate_to_datetime(pub_date).strftime("%Y.%m.%d %H:%M")
         except Exception:
-            published = datetime.now().strftime("%Y.%m.%d %H:%M")
+            published = now_kst().strftime("%Y.%m.%d %H:%M")
         items.append(
             {
                 "published": published,
@@ -582,7 +589,7 @@ def refresh_news(
     write_json(
         cache_path,
         {
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "updated_at": now_kst().strftime("%Y-%m-%d %H:%M:%S"),
             "query": query,
             "source": source,
             "items": items,
@@ -657,30 +664,68 @@ section[data-testid="stSidebar"] [data-testid="stAlert"] {
 section[data-testid="stSidebar"] [data-testid="stAlert"] * { color:#eaf7ed !important; }
 [data-testid="collapsedControl"] button,
 [data-testid="stSidebarCollapseButton"],
+button[data-testid="stBaseButton-header"],
 button[kind="header"] {
   color:var(--green-dark) !important;
-  background:rgba(25,122,69,.12) !important;
+  background:rgba(25,122,69,.14) !important;
   border-radius:11px !important;
+  opacity:1 !important;
+}
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"],
+button[data-testid="stBaseButton-header"],
+button[kind="header"] {
+  opacity:1 !important;
+}
+[data-testid="collapsedControl"] *,
+[data-testid="stSidebarCollapseButton"] *,
+button[data-testid="stBaseButton-header"] *,
+button[kind="header"] * {
+  color:var(--green-dark) !important;
+  opacity:1 !important;
 }
 [data-testid="collapsedControl"] button svg,
 [data-testid="collapsedControl"] svg,
 [data-testid="stSidebarCollapseButton"] svg,
+button[data-testid="stBaseButton-header"] svg,
 button[kind="header"] svg {
   color:var(--green-dark) !important;
   fill:var(--green-dark) !important;
   stroke:var(--green-dark) !important;
 }
+[data-testid="collapsedControl"] svg path,
+[data-testid="stSidebarCollapseButton"] svg path,
+button[data-testid="stBaseButton-header"] svg path,
+button[kind="header"] svg path {
+  fill:var(--green-dark) !important;
+  stroke:var(--green-dark) !important;
+}
 section[data-testid="stSidebar"] [data-testid="collapsedControl"] button,
 section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-header"],
 section[data-testid="stSidebar"] button[kind="header"] {
   color:#ffffff !important;
   background:rgba(255,255,255,.18) !important;
 }
+section[data-testid="stSidebar"] [data-testid="collapsedControl"] *,
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] *,
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-header"] *,
+section[data-testid="stSidebar"] button[kind="header"] * {
+  color:#ffffff !important;
+}
 section[data-testid="stSidebar"] [data-testid="collapsedControl"] button svg,
 section[data-testid="stSidebar"] [data-testid="collapsedControl"] svg,
 section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] svg,
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-header"] svg,
 section[data-testid="stSidebar"] button[kind="header"] svg {
   color:#ffffff !important;
+  fill:#ffffff !important;
+  stroke:#ffffff !important;
+}
+section[data-testid="stSidebar"] [data-testid="collapsedControl"] svg path,
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] svg path,
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-header"] svg path,
+section[data-testid="stSidebar"] button[kind="header"] svg path {
   fill:#ffffff !important;
   stroke:#ffffff !important;
 }
