@@ -655,17 +655,35 @@ section[data-testid="stSidebar"] [data-testid="stAlert"] {
   border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.08);
 }
 section[data-testid="stSidebar"] [data-testid="stAlert"] * { color:#eaf7ed !important; }
+[data-testid="collapsedControl"] button,
+[data-testid="stSidebarCollapseButton"],
 button[kind="header"] {
   color:var(--green-dark) !important;
-  background:rgba(25,122,69,.10) !important;
-  border-radius:10px !important;
+  background:rgba(25,122,69,.12) !important;
+  border-radius:11px !important;
 }
-button[kind="header"] svg { color:var(--green-dark) !important; fill:var(--green-dark) !important; }
+[data-testid="collapsedControl"] button svg,
+[data-testid="collapsedControl"] svg,
+[data-testid="stSidebarCollapseButton"] svg,
+button[kind="header"] svg {
+  color:var(--green-dark) !important;
+  fill:var(--green-dark) !important;
+  stroke:var(--green-dark) !important;
+}
+section[data-testid="stSidebar"] [data-testid="collapsedControl"] button,
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
 section[data-testid="stSidebar"] button[kind="header"] {
   color:#ffffff !important;
-  background:rgba(255,255,255,.16) !important;
+  background:rgba(255,255,255,.18) !important;
 }
-section[data-testid="stSidebar"] button[kind="header"] svg { color:#ffffff !important; fill:#ffffff !important; }
+section[data-testid="stSidebar"] [data-testid="collapsedControl"] button svg,
+section[data-testid="stSidebar"] [data-testid="collapsedControl"] svg,
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] svg,
+section[data-testid="stSidebar"] button[kind="header"] svg {
+  color:#ffffff !important;
+  fill:#ffffff !important;
+  stroke:#ffffff !important;
+}
 
 /* Main widgets */
 div[data-testid="stVerticalBlockBorderWrapper"] {
@@ -681,10 +699,16 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 .stButton > button[kind="primary"]:hover { background:var(--green-dark) !important; }
 .stButton > button:not([kind="primary"]), .stLinkButton > a { background:#edf2ed !important; color:var(--ink) !important; }
 [data-testid="stFileUploaderDropzone"] {
-  min-height:200px; display:flex; align-items:center; border:2px dashed #b9cabb !important;
+  min-height:56px !important; height:56px !important; display:flex; align-items:center; border:2px dashed #b9cabb !important;
   border-radius:16px !important; background:#f8fbf8 !important;
+  padding:8px 12px !important;
 }
 [data-testid="stFileUploaderDropzone"] button { background:#edf2ed !important; color:var(--ink) !important; border:0 !important; }
+[data-testid="stFileUploaderDropzone"] small,
+[data-testid="stFileUploaderDropzone"] span,
+[data-testid="stFileUploaderDropzone"] p {
+  color:var(--green-dark) !important;
+}
 [data-testid="stCameraInput"] { border:2px dashed #b9cabb; border-radius:16px; padding:12px; background:#f8fbf8; }
 [data-baseweb="tab-list"] { gap:.35rem; }
 [data-baseweb="tab"] { border-radius:10px 10px 0 0; }
